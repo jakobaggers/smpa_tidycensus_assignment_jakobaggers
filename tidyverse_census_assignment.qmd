@@ -25,6 +25,7 @@ options(scipen=999)
 # Load the tidyverse.
 library(tidyverse)
 library(tidycensus)
+
 ```
 
 ## Setup Census API
@@ -35,7 +36,7 @@ You'll need your Census API Key:
 
 ```{r echo=FALSE}
 
-myapikey <- "YOUR API KEY"
+myapikey <- "86359f4e38c04ed1b0033e61bd10d11e1fb9293e"
 
 census_api_key(myapikey, overwrite=TRUE)
 ```
@@ -47,7 +48,7 @@ You'll also need to load the list of American Community Survey variables from th
 **Task** load the variables from the 2021 5-year ACS and save them to a dataframe
 
 ```{r}
-
+censusvariables <- load_variables(2021, "acs5", cache = TRUE)
 
 ```
 
@@ -56,21 +57,30 @@ You'll also need to load the list of American Community Survey variables from th
 **Q1** What is the Maryland jurisdiction with the lowest median age, according to the ACS 2021 5-year estimates? You will need to find the variable for median age first. 
 
 ```{r}
+medage <- "B01002_001"
 
+medage_dta <- get_acs(geography = "county", 
+        variables = medage,
+        state = "MD",
+        output = "wide")
 
-
-
+min(medage_dta$B01002_001E)
 
 
 ```
-
+The answer is Baltimore County, MD.
 
 **Q2** Which Maryland counties have a median age of at least 50? You can use the dataframe you just made to answer this, but you must write code to display only those counties with a median age of at least 50. 
 
 ```{r}
+medage_dta <- 
+  medage_dta %>% 
+  mutate(
+    geq_50 = case_when(B01002_001E >= 50 ~ "Above 50",
+                       B01002_001E < 50 ~ "Below 50")
+  )
 
-
-
+filter(medage_dta, geq_50 == "Above 50")
 
 ```
 
@@ -82,25 +92,59 @@ For each dataframe, rename the `estimate` column to a meaningful name you've giv
 Which county has the highest percentage of 5-17 year-olds who speak Spanish at home and also speak English very well?
 
 ```{r}
+# B16004_005 5-17 english spanish very well
+# B01001_006 5-17 total male
+# B01001_030 5-17 total female
 
+totalmale_5to17 <- "B01001_006"
+totalfemale_5to17 <- "B01001_030"
 
+total_5to17 <- get_acs(geography = "county", 
+        variables = c(totalmale_5to17, totalfemale_5to17),
+        state = "MD",
+        output = "wide")
 
+total_5to17 <-
+  total_5to17 %>% 
+  rename(male_5to17 = B01001_006E,
+        female_5to17 = B01001_030E) %>% 
+  mutate(total_5to17 = male_5to17 + female_5to17)
+    
+total_5to17 <-
+  total_5to17 %>% 
+  select(GEOID, NAME, total_5to17)
 
+englishspanish_5to17 <- "B16004_005"
 
+englishspanish_5to17 <- get_acs(geography = "county", 
+        variables = "B16004_005",
+        state = "MD",
+        output = "wide")
 
+englishspanish_5to17 <- 
+  englishspanish_5to17 %>% 
+  select(-B16004_005M) %>% 
+  rename(num_englishspanish_5to17 = B16004_005E)
 
+dta <- left_join(total_5to17, englishspanish_5to17, by = c("GEOID", "NAME"))
 
+dta <- dta %>% 
+  mutate(pct = round((num_englishspanish_5to17/total_5to17) * 100, digits = 2))
 
+max(dta$pct)
 
-
-
+dta <- dta %>% 
+  arrange(desc(pct))
 ```
-
+Prince George's County, Maryland has the highest percentage of 5-17 year-olds who speak Spanish at home and also speak English very well.
 
 **Q4** Given the counties with the largest percentage of 5-17 year-olds that speak Spanish at home, which county stands out to you in the data as different from the others? How would you describe the top 5 counties? How would you describe Garrett County's numbers?
 
-PUT ANSWER HERE
+Garrett, Allegany, and Carrol county stand out to me as the lowest percentage of 5-17 year olds who speak Spanish at home and also speak English very well. 
 
+For the Top 5, Prince George's and Montgomery county both have very high populations of 5-17 year olds and alo very high pct of the target demographic. However, Talbot county and Caroline County both just have a very small number of 5-17 year olds so their percentage is also high. 
+
+I am very surprised by Garrett county because their Hispanic population is only 1.4% and the white population is 97%, but compared to other really low percentages for this question, like Allegany county where the hispanic population is 2.4% but the white population is only 84%.
 
 
 **Q5** Pennsylvanians are currently requesting and submitting mail ballots for the November election. You'd like to know more about the people who live in the areas sending in mail ballots. Read in the `zip_totals.csv` file in the data folder containing the number of returned mail ballots per zip code. Then create a dataframe of Pennsylvania ZCTAs that include the following variables from the 2019 ACS: total population and median income. You will need to add `output = "wide"` to the get_acs function so that you get columns for those two variables' estimates and margins of error.
@@ -114,24 +158,71 @@ Join the ZCTA dataframe to the zip totals dataframe and calculate a per capita r
 -   What's the most interesting one from this last result?
 
 ```{r}
+pa_zip_totals <- read_csv("data/pa_zip_totals.csv")
 
+totalpop <- "B01001_001"
+medincome <- "B06011_001"
 
+pa_dta <- get_acs(geography = "zcta", 
+        variables = c(totalpop, medincome),
+        output = "wide")
 
+dta2<- 
+  left_join(pa_dta, pa_zip_totals, by = c("GEOID" = "zip"))
 
+dta2 <- 
+  dta2 %>% 
+  rename(totalpop = B01001_001E,
+         medincome = B06011_001E,
+         ) %>% 
+  select(-B01001_001M, -B06011_001M) %>% 
+  na.omit(count)
 
+#per capita
+dta2 <- dta2 %>% 
+  mutate(mail_in_per100 = (count/totalpop)*100)
 
+dta_100 <-
+  dta2 %>% 
+  filter(count >= 100)
 
+#income question: 100k
+dta_ten <-
+  dta2 %>% 
+  filter(mail_in_per100 >= 10) %>% 
+  mutate("income_100k" = case_when(medincome >= 100000 ~ "Greater Than 100k",
+                   medincome < 100000 ~ "Less Than 100k"
+  ))
 
+dta_ten %>% 
+  group_by(income_100k) %>% 
+  summarize(n = n())
+
+#income question: state med
+dta_ten<-
+  dta_ten %>% 
+  mutate("income_statemed" = case_when(
+                    medincome >= 68957 ~ "Greater Than State Med",
+                    medincome < 68957 ~ "Less Than State Med"
+  ))
+
+dta_ten %>% 
+  group_by(income_statemed) %>% 
+  summarize(n = n())
+
+min(dta_ten$medincome)
 ```
-
+- The zipcode that returned the most mail in ballots was 19436 at 30.78176/100 people. 
+- Census Reporter tells me that the median age is 78 (which is extremely high), and that it is 100% white. There are a few other interesting demographic notes but I think those are the most important ones. https://censusreporter.org/profiles/86000US19436-19436/
+- There is only one (1) county with more than 10/100 mail in ballots whose med income is at least 100k
+- There are 40 that are less than the state median of $68,957. 
+- One thing that surprised me was the county whose med income is $15,000. That is extremely extremely low. 
 
 ```{r}
-
-
-
-
-
-
-
-
+cor(dta2$mail_in_per100, dta2$medincome)
 ```
+If I had more time, I would download a bunch of extra variables, and then run multiple correlation coefficient tests on them to see which has the strongest relationship with mail in ballots. 
+
+But for the time being, it looks like median income is not a strong predictor of mail_in_ballots. 
+
+I would love to do this test with Age, and maybe distance to commute to work/nearest populated area.
